@@ -32,6 +32,13 @@ async function run() {
     const contestsCollection = db.collection("contests");
 
     // api
+    app.get("/contests", async (req, res) => {
+      const query = {};
+      const cursor = contestsCollection.find(query);
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+
     app.post("/contests", async (req, res) => {
       const contest = req.body;
       const result = await contestsCollection.insertOne(contest);
