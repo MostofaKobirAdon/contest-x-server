@@ -30,8 +30,9 @@ async function run() {
     await client.connect();
     const db = client.db("contest_x_db");
     const contestsCollection = db.collection("contests");
+    const usersCollection = db.collection("users");
 
-    // api
+    // contest api
     app.get("/contests", async (req, res) => {
       const query = {};
       const cursor = contestsCollection.find(query);
@@ -42,6 +43,14 @@ async function run() {
     app.post("/contests", async (req, res) => {
       const contest = req.body;
       const result = await contestsCollection.insertOne(contest);
+      res.send(result);
+    });
+
+    // users api
+
+    app.post("/users", async (req, res) => {
+      const user = req.body;
+      const result = await usersCollection.insertOne(user);
       res.send(result);
     });
 
