@@ -3,7 +3,7 @@ const app = express();
 const cors = require("cors");
 const port = 3000;
 require("dotenv").config();
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 // middlewares
 
@@ -34,14 +34,33 @@ async function run() {
 
     // contest api
     app.get("/contests", async (req, res) => {
+      const sortBy = req.query.sortBy;
+      const order = req.query.order;
       const query = {};
+      if (sortBy && order) {
+        query.sortBy = order === "asc" ? -1 : 1;
+      }
       const cursor = contestsCollection.find(query);
       const result = await cursor.toArray();
       res.send(result);
     });
 
+    app.get("/contests/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await contestsCollection.findOne(query);
+      res.send(result);
+    });
+
     app.post("/contests", async (req, res) => {
       const contest = req.body;
+      contest.winner = {};
+      contest.createdAt = new Date();
+      contest.participants = [];
+      contest.participantsCount = contest.participants.length;
+      contest.submissions = [];
+      contest.isEnded = false;
+      contest.status = "pending";
       const result = await contestsCollection.insertOne(contest);
       res.send(result);
     });
@@ -56,6 +75,12 @@ async function run() {
 
     app.post("/users", async (req, res) => {
       const user = req.body;
+      const email = user.email;
+      user.role = "user";
+      const userExists = await usersCollection.findOne({ email });
+      if (userExists) {
+        return res.send({ message: "user exists" });
+      }
       const result = await usersCollection.insertOne(user);
       res.send(result);
     });
