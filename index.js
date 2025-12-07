@@ -32,7 +32,12 @@ async function run() {
     const contestsCollection = db.collection("contests");
 
     // api
-   
+    app.post("/contests", async (req, res) => {
+      const contest = req.body;
+      const result = await contestsCollection.insertOne(contest);
+      res.send(result);
+    });
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
