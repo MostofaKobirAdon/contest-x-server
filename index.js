@@ -45,6 +45,17 @@ async function run() {
       res.send(result);
     });
 
+    app.get("/popular-contests", async (req, res) => {
+      const limit = req.query.limit ? parseInt(req.query.limit) : 0;
+      const query = {};
+      const cursor = contestsCollection
+        .find(query)
+        .sort({ participantsCount: 1 })
+        .limit(limit);
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+
     app.get("/contests/:id", async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
@@ -55,11 +66,13 @@ async function run() {
     app.post("/contests", async (req, res) => {
       const contest = req.body;
       contest.winner = {};
+      const deadline = new Date(contest.deadline);
+      const now = new Date();
       contest.createdAt = new Date();
       contest.participants = [];
       contest.participantsCount = contest.participants.length;
       contest.submissions = [];
-      contest.isEnded = false;
+      contest.isEnded = deadline <= now ? true : false;
       contest.status = "pending";
       const result = await contestsCollection.insertOne(contest);
       res.send(result);
