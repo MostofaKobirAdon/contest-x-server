@@ -83,10 +83,11 @@ async function run() {
       // const sortBy = req.query.sortBy;
       // const order = req.query.order;
       const creatorEmail = req.query.creatorEmail;
+      const status = req.query.status;
       const query = {};
-      // if (sortBy && order) {
-      //   query.sortBy = order === "asc" ? -1 : 1;
-      // }
+      if (status) {
+        query.status = status;
+      }
       if (creatorEmail) {
         query.creatorEmail = creatorEmail;
       }
@@ -128,7 +129,25 @@ async function run() {
       res.send(result);
     });
 
-    // users api
+    app.patch(
+      "/contests/:id/status",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const statusInfo = req.body;
+        const query = { _id: new ObjectId(id) };
+        const updatedDoc = {
+          $set: {
+            status: statusInfo.status,
+          },
+        };
+        const result = await contestsCollection.updateOne(query, updatedDoc);
+        res.send(result);
+      }
+    );
+
+    // user api
     app.get("/users", async (req, res) => {
       const query = {};
       const cursor = usersCollection.find(query);
