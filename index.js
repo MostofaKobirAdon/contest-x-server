@@ -5,10 +5,33 @@ const port = 3000;
 require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
+const admin = require("firebase-admin");
+
+const serviceAccount = require("./contest-x-firebase-adminsdk.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
 // middlewares
 
 app.use(express.json());
 app.use(cors());
+// funtion for verifying fb token
+const verifyFBToken = async (req, res, next) => {
+  const token = req.headers.authorization;
+  if (!token) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
+  try {
+    const idToken = token.split(" ")[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    req.decoded_email = decoded.email;
+    next();
+  } catch (err) {
+    res.status(401).send({ message: "unauthorized access" });
+  }
+};
 
 const uri = `${process.env.MONGODB_URI}`;
 
@@ -31,14 +54,41 @@ async function run() {
     const db = client.db("contest_x_db");
     const contestsCollection = db.collection("contests");
     const usersCollection = db.collection("users");
+    const winnersCollection = db.collection("winners");
+    // midllwar for varify admin
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = { email: email };
+      const user = await usersCollection.findOne(query);
+      if (!user || user.role !== "admin") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
+
+    // verifuing creator  middlwaare
+
+    const verifyCreator = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = { email: email };
+      const user = await usersCollection.findOne(query);
+      if (!user || user.role !== "creator") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
 
     // contest api
     app.get("/contests", async (req, res) => {
-      const sortBy = req.query.sortBy;
-      const order = req.query.order;
+      // const sortBy = req.query.sortBy;
+      // const order = req.query.order;
+      const creatorEmail = req.query.creatorEmail;
       const query = {};
-      if (sortBy && order) {
-        query.sortBy = order === "asc" ? -1 : 1;
+      // if (sortBy && order) {
+      //   query.sortBy = order === "asc" ? -1 : 1;
+      // }
+      if (creatorEmail) {
+        query.creatorEmail = creatorEmail;
       }
       const cursor = contestsCollection.find(query);
       const result = await cursor.toArray();
@@ -63,7 +113,7 @@ async function run() {
       res.send(result);
     });
 
-    app.post("/contests", async (req, res) => {
+    app.post("/contests", verifyFBToken, verifyCreator, async (req, res) => {
       const contest = req.body;
       contest.winner = {};
       const deadline = new Date(contest.deadline);
@@ -85,17 +135,29 @@ async function run() {
       const result = await cursor.toArray();
       res.send(result);
     });
-    app.patch("/users/:id", async (req, res) => {
-      const id = req.params.id;
-      const roleInfo = req.body;
-      const query = { _id: new ObjectId(id) };
-      const updatedDoc = {
-        $set: {
-          role: roleInfo.role,
-        },
-      };
-      const result = await usersCollection.updateOne(query, updatedDoc);
-      res.send(result);
+    app.patch(
+      "/users/:id/role",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const roleInfo = req.body;
+        const query = { _id: new ObjectId(id) };
+        const updatedDoc = {
+          $set: {
+            role: roleInfo.role,
+          },
+        };
+        const result = await usersCollection.updateOne(query, updatedDoc);
+        res.send(result);
+      }
+    );
+
+    app.get("/users/:email/role", async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email };
+      const user = await usersCollection.findOne(query);
+      res.send({ role: user?.role || "user" });
     });
 
     app.post("/users", async (req, res) => {
