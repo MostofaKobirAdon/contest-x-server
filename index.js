@@ -223,6 +223,58 @@ async function run() {
     );
 
     app.patch(
+      "/contests/:id/winner",
+      verifyFBToken,
+      verifyCreator,
+      async (req, res) => {
+        const id = req.params.id;
+        const winnerInfo = req.body;
+
+        const contest = await contestsCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (contest.winner) {
+          return res
+            .status(409)
+            .send({ message: "Winner already declared for this contest" });
+        }
+
+        const user = await usersCollection.findOne({ email: winnerInfo.email });
+
+        const winnerData = {
+          name: winnerInfo.name,
+          email: winnerInfo.email,
+          photoURL: user?.photoURL,
+          contestId: new ObjectId(id),
+          contestName: contest.name,
+          prize_money: contest.prize_money,
+        };
+        const update = {
+          $set: {
+            winner: {
+              name: winnerInfo.name,
+              email: winnerInfo.email,
+              photoURL: user?.photoURL,
+            },
+          },
+        };
+        const contestResult = await contestsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          update
+        );
+
+        const winnersResult = await winnersCollection.insertOne(winnerData);
+
+        res.send({
+          message: "Winner declared successfully",
+          contestResult,
+          winnersResult,
+        });
+      }
+    );
+
+    app.patch(
       "/contests/:id/status",
       verifyFBToken,
       verifyAdmin,
@@ -335,12 +387,13 @@ async function run() {
       res.send({ role: user?.role || "user" });
     });
 
-    app.patch("/users/:id", async (req, res) => {
-      const id = req.params.id;
+    app.patch("/users/:email", async (req, res) => {
+      const email = req.params.email;
       const updatedData = req.body;
-      const query = { _id: new ObjectId(id) };
+      const query = { email: email };
       const update = {
         $set: {
+          photoURL: updatedData.image,
           displayName: updatedData.name,
           bio: updatedData.bio,
         },
@@ -348,17 +401,10 @@ async function run() {
       const result = await usersCollection.updateOne(query, update);
       res.send(result);
     });
-
-    app.post("/users", async (req, res) => {
-      const user = req.body;
-      const email = user.email;
-      user.role = "user";
-      user.bio = "";
-      const userExists = await usersCollection.findOne({ email });
-      if (userExists) {
-        return res.send({ message: "user exists" });
-      }
-      const result = await usersCollection.insertOne(user);
+    app.get("/users/:email", async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email };
+      const result = await usersCollection.findOne(query);
       res.send(result);
     });
 
