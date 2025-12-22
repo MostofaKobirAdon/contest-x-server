@@ -8,7 +8,10 @@ const stripe = require("stripe")(`${process.env.STRIPE_SECRET}`);
 
 const admin = require("firebase-admin");
 
-const serviceAccount = require("./contest-x-firebase-adminsdk.json");
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
+  "utf8"
+);
+const serviceAccount = JSON.parse(decoded);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -51,7 +54,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
     const db = client.db("contest_x_db");
     const contestsCollection = db.collection("contests");
     const usersCollection = db.collection("users");
@@ -97,7 +100,13 @@ async function run() {
       const creatorEmail = req.query.creatorEmail;
       const status = req.query.status;
       const type = req.query.type;
+      const searchText = req.query.searchText;
       const query = {};
+
+      if (searchText) {
+        query.contest_type = { $regex: searchText, $options: "i" };
+        query.status === "approved";
+      }
 
       if (status) {
         query.status = status;
@@ -233,8 +242,7 @@ async function run() {
         const contest = await contestsCollection.findOne({
           _id: new ObjectId(id),
         });
-
-        if (contest.winner) {
+        if (contest?.winner?.email) {
           return res
             .status(409)
             .send({ message: "Winner already declared for this contest" });
@@ -295,7 +303,7 @@ async function run() {
       const id = req.params.id;
       const isEndedInfo = req.body;
       const query = { _id: new ObjectId(id) };
-      const submissionQuery = { contestId: new ObjectId(id) };
+      const submissionQuery = { contestId: id };
       const update = {
         $set: {
           isEnded: isEndedInfo.isEnded,
@@ -317,6 +325,77 @@ async function run() {
         submissionUpdateResult,
       });
     });
+
+    app.get("/win-percentage", verifyFBToken, async (req, res) => {
+      const email = req.query.email;
+
+      const pipeline = [
+        { $match: { customerEmail: email } },
+        { $addFields: { contestObjectId: { $toObjectId: "$contestId" } } },
+        {
+          $lookup: {
+            from: "contests",
+            localField: "contestObjectId",
+            foreignField: "_id",
+            as: "contest",
+          },
+        },
+        { $unwind: "$contest" },
+        { $replaceRoot: { newRoot: "$contest" } },
+      ];
+
+      const result = await paymentCollection.aggregate(pipeline).toArray();
+
+      const participatedCount = result.length;
+      const wonCount = result.filter((c) => c.winner?.email === email).length;
+      const winPercentage =
+        participatedCount === 0 ? 0 : (wonCount / participatedCount) * 100;
+
+      res.send({ participatedCount, wonCount, winPercentage });
+    });
+
+    // leaderbord  enpoint
+
+    app.get("/leaderboard", async (req, res) => {
+      const pipeline = [
+        {
+          $lookup: {
+            from: "winners",
+            localField: "email",
+            foreignField: "email",
+            as: "userWins",
+          },
+        },
+        {
+          $addFields: {
+            totalWins: { $size: "$userWins" },
+          },
+        },
+        {
+          $project: {
+            _id: 1,
+            displayName: 1,
+            email: 1,
+            photoURL: 1,
+            totalWins: 1,
+          },
+        },
+        { $sort: { totalWins: -1 } },
+      ];
+      const result = await usersCollection.aggregate(pipeline).toArray();
+      res.send(result);
+    });
+
+    // winners
+
+    app.get("/winners", async (req, res) => {
+      const email = req.query.email;
+      const query = { email: email };
+      const cursor = winnersCollection.find(query);
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+
     // submision
 
     app.get("/submissions", async (req, res) => {
@@ -330,6 +409,17 @@ async function run() {
       const result = await cursor.toArray();
       res.send(result);
     });
+    app.get(
+      "/submissions/:contestId",
+
+      async (req, res) => {
+        const contestId = req.params.contestId;
+        const query = { contestId: contestId };
+        const cursor = submissionsCollection.find(query);
+        const result = await cursor.toArray();
+        res.send(result);
+      }
+    );
     app.post("/submissions", verifyFBToken, async (req, res) => {
       const submissionData = req.body;
       const participantPaid = await paymentCollection.findOne({
@@ -357,10 +447,16 @@ async function run() {
 
     // user api
     app.get("/users", async (req, res) => {
+      const limit = parseInt(req.query.limit);
+      const skip = parseInt(req.query.skip);
       const query = {};
-      const cursor = usersCollection.find(query);
+      const cursor = usersCollection
+        .find(query)
+        .limit(limit || 0)
+        .skip(skip || 0);
       const result = await cursor.toArray();
-      res.send(result);
+      const count = await usersCollection.countDocuments();
+      res.send({ result, total: count });
     });
     app.patch(
       "/users/:id/role",
@@ -405,6 +501,22 @@ async function run() {
       const email = req.params.email;
       const query = { email: email };
       const result = await usersCollection.findOne(query);
+      res.send(result);
+    });
+
+    app.post("/users", async (req, res) => {
+      const userInfo = req.body;
+      const userExists = await usersCollection.findOne({
+        email: userInfo.email,
+      });
+      if (userExists) {
+        return res.send({ message: "user already exists" });
+      }
+      const result = await usersCollection.insertOne({
+        ...userInfo,
+        role: "user",
+        bio: "",
+      });
       res.send(result);
     });
 
@@ -453,7 +565,6 @@ async function run() {
         const participantExists = contest.participants.find(
           (p) => p.email === participant.email
         );
-        console.log("consoling participant exisit", participantExists);
         if (participantExists) {
           return res.send({ message: "participant already exists" });
         }
@@ -492,7 +603,6 @@ async function run() {
           },
         };
         const result = await contestsCollection.updateOne(query, update);
-        console.log(session);
         return res.send(result);
       }
 
@@ -500,10 +610,10 @@ async function run() {
     });
 
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
+    // await client.db("admin").command({ ping: 1 });
+    // console.log(
+    //   "Pinged your deployment. You successfully connected to MongoDB!"
+    // );
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
