@@ -20,7 +20,11 @@ admin.initializeApp({
 // middlewares
 
 app.use(express.json());
-app.use(cors());
+app.use(
+  cors({
+    origin: "https://contest-x.netlify.app", // or 5173 for Vite
+  })
+);
 // funtion for verifying fb token
 const verifyFBToken = async (req, res, next) => {
   const token = req.headers.authorization;
@@ -483,7 +487,7 @@ async function run() {
       res.send({ role: user?.role || "user" });
     });
 
-    app.patch("/users/:email", async (req, res) => {
+    app.patch("/users/:email", verifyFBToken, async (req, res) => {
       const email = req.params.email;
       const updatedData = req.body;
       const query = { email: email };
@@ -520,7 +524,6 @@ async function run() {
       res.send(result);
     });
 
-    // pament apis here
     app.get("/payments", async (req, res) => {
       const query = {};
       const cursor = paymentCollection.find(query);
